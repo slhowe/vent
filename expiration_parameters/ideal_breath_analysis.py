@@ -12,17 +12,22 @@ from numpy import nan
 from numpy.linalg import lstsq
 
 # The constants for the data
-P = [8.64, 12.474, 20.168064]
-E = [17.28, 24.948, 40.336128]
-Ee = [8.64/0.4, 39.0, 58.0]
+P = [10, 12.474, 20.168064]
+#P = [8.64, 12.474, 20.168064]
+E = [10, 24.948, 40.336128]
+#E = [17.28, 24.948, 40.336128]
+Ee = [8, 39.0, 58.0]
+#Ee = [8.64/0.4, 39.0, 58.0]
 #E = Ee
-R = [2.592, 3.7422, 6.0504192]
-Re = [3.98765, 2.2, 3.5]
+R = [10, 3.7422, 6.0504192]
+#R = [2.592, 3.7422, 6.0504192]
+Re = [8, 2.2, 3.5]
+#Re = [3.98765, 2.2, 3.5]
 #R = Re
 PEEP = 0
 SAMPLING_FREQ = 550
 exp_len = 2 * SAMPLING_FREQ
-insp_len = int(1.0 * SAMPLING_FREQ)
+insp_len = int(1.01 * SAMPLING_FREQ)
 
 LIN = 0
 EXP = 1
@@ -106,6 +111,8 @@ for i in range(len(P)):
     # zero flow pressure
     pressure_offs = ((pressures_in[-1] - pressures_out[0])*(-flow_out[0]/(flow_in[-1] - flow_out[0]))
                   + pressures_out[0])
+    print('zcp')
+    print(pressure_offs)
 
     # Repeat breathing cycles
     repeats = 0

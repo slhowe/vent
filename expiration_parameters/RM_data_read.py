@@ -32,7 +32,8 @@ class Breaths:
 class Storage:
     # Extracts data
     def __init__(self):
-        pass
+        # list of breaths for quick access
+        self.breath_list = []
 
     def extract_data(self, filename):
         # Store data from file
@@ -49,6 +50,7 @@ class Storage:
 
                 # End recording at BE
                 elif(recording and row[0] == 'BE'):
+                    self.breath_list.append(breath_storage)
                     recording = False
 
                 # Otherwise record
