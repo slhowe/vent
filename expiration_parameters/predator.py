@@ -1,7 +1,11 @@
 #!/bin/bash
+import sys
+sys.path.insert(0, '/home/sarah/Documents/Spirometry/python/extensions')
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from filters import hamming
 
 #~~~~~~~~~~~~~~~~~~
 # Predator function
@@ -12,7 +16,7 @@ import numpy as np
 # Normalise each half to 1s and super impose
 # Pressure in inspiration takes max, others take mean
 
-def predator(pressures, flows, volumes):
+def predator(pressures, flows, volumes, plotting=False):
 
     # Data in form [[set1], [set2], ... , [setn]]
     # Start with first set
@@ -31,7 +35,7 @@ def predator(pressures, flows, volumes):
         end_insp = 15
         i = end_insp
         while(i < len(flows[data]) - 4):
-            if((flows[data][i] < 0.01 or flows[data][i+1] < 0) and flows[data][i+4] < 0.01):
+            if((flows[data][i+1] < 0) and flows[data][i+4] < 0.01):
                 end_insp = i
                 i = len(flows[data])
             i += 1
@@ -72,11 +76,13 @@ def predator(pressures, flows, volumes):
                     new_sample = interpolate(points, times, target_time)
                     dataset.append(new_sample)
                     target_time += interval
-                    # Go back one index incase interpolation timesteps are small and
+                    # Go back one index in case interpolation time steps are small and
                     # Two interpolations fit within one pair of real data
                     index -= 1
                 index += 1
                 t = datatime[index]
+
+            dataset.append(new_sample)
             return dataset
 
         # resample at preset intervals
@@ -89,7 +95,7 @@ def predator(pressures, flows, volumes):
         new_exp_volume = resampled(exp_volume, exp_time, interval)
 
         new_insp_time = [t*interval for t in range(len(new_insp_pressure))]
-        new_exp_time = [t*interval for t in range(len(new_exp_pressure))]
+        new_exp_time = [t*interval+new_insp_time[-1] for t in range(len(new_exp_pressure))]
 
         #plt.plot(new_insp_pressure + new_exp_pressure, 'o-')
         #plt.plot(new_insp_flow + new_exp_flow, 'o-')
@@ -111,13 +117,82 @@ def predator(pressures, flows, volumes):
     mean_insp_volume =  np.mean(new_insp_volumes, axis=0).tolist()
     mean_exp_volume =  np.mean(new_exp_volumes, axis=0).tolist()
 
-    final_pressure = max_insp_pressure + mean_exp_pressure
-    final_flow = mean_insp_flow + mean_exp_flow
-    final_volume  = mean_insp_volume + mean_exp_volume
+    # only return inspiratory data between correct values
+    # correct values are assumed before pressure gradient changes
+    def sign(x):
+        res = [0]*len(x)
+        for k in range(len(x)):
+            if x[k] > 0:
+                res[k] = 1
+            elif x[k] < 0:
+                res[k] = -1
+            elif x[k] == 0:
+                res[k] = 0
+            else:
+                res[k] = x
+        return res
 
-    #plt.plot(final_pressure, '-k', linewidth=3)
-    #plt.plot(final_flow, '-k', linewidth=3)
-    #plt.plot(final_volume, '-k', linewidth=3)
-    #plt.show()
+    # first filter the data heaps
+    filt_pressure = hamming(max_insp_pressure, 12, 125, 25, plot=False)
+    filt_pressure = np.real(filt_pressure).tolist()
+    #print(len(max_insp_pressure))
+    #print(len(filt_pressure))
+    #print(len(new_insp_time))
 
-    return [final_pressure, final_flow, final_volume]
+    # find the inflection points
+    diff_P = np.diff(filt_pressure)
+    #print(diff_P)
+    sign_diff_P = sign(diff_P)
+    #print(sign_diff_P)
+    diff_sign_diff_P = np.diff(sign_diff_P)
+    #print(diff_sign_diff_P)
+    abs_diff_sign_diff_P = np.abs(diff_sign_diff_P)
+    #print(abs_diff_sign_diff_P)
+    gradient_change_position = np.where(abs_diff_sign_diff_P == 2)[0]
+    #print(gradient_change_position)
+    #print(len(gradient_change_position))
+
+
+    if(plotting):
+        plt.show()
+
+        #final_pressure = max_insp_pressure + exp_pressure
+        #final_flow = mean_insp_flow + exp_flow
+        #final_volume  = mean_insp_volume + exp_volume
+        final_pressure = max_insp_pressure + mean_exp_pressure
+        final_flow = mean_insp_flow + mean_exp_flow
+        final_volume  = mean_insp_volume + mean_exp_volume
+
+        for k in range(len(new_insp_pressures)):
+            plt.plot(new_insp_time + new_exp_time, new_insp_pressures[k]+new_exp_pressures[k])
+
+        plt.plot(new_insp_time, filt_pressure, 'orange')
+        plt.plot(new_insp_time[gradient_change_position[0]], final_pressure[gradient_change_position[0]], 'rs')
+        plt.plot(new_insp_time+new_exp_time, final_pressure, 'k*')
+        plt.show()
+
+        for k in range(len(new_insp_flows)):
+            plt.plot(new_insp_flows[k])
+
+        plt.plot(final_flow, 'k*')
+        plt.show()
+
+    #gradient_change_position = [0]
+    final_pressure_e = max_insp_pressure + mean_exp_pressure
+    final_flow_e = mean_insp_flow + mean_exp_flow
+    final_volume_e  = mean_insp_volume + mean_exp_volume
+
+    if(len(gradient_change_position) >= 2):
+        max_insp_pressure = max_insp_pressure[:gradient_change_position[0]]
+        new_insp_time = new_insp_time[:gradient_change_position[0]]
+        mean_insp_flow = mean_insp_flow[:gradient_change_position[0]]
+        mean_insp_volume = mean_insp_volume[:gradient_change_position[0]]
+
+    #final_pressure = max_insp_pressure + exp_pressure
+    #final_flow = mean_insp_flow + exp_flow
+    #final_volume  = mean_insp_volume + exp_volume
+    final_pressure_i = max_insp_pressure + mean_exp_pressure
+    final_flow_i = mean_insp_flow + mean_exp_flow
+    final_volume_i  = mean_insp_volume + mean_exp_volume
+
+    return [final_pressure_i, final_flow_i, final_volume_i, final_pressure_e, final_flow_e, final_volume_e]

@@ -20,13 +20,21 @@ from scipy import io
 from scipy.stats.stats import pearsonr
 from numpy.linalg import lstsq
 
-def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, end_insp=nan, printing=True):
-    Ei = 0
-    Ri = 0
-    Ee = 0
-    Re = 0
-    Em = 0
-    Rm = 0
+def split_parameters(pressure,
+                    flow,
+                    volume,
+                    sampling_frequency,
+                    prev_peep=nan,
+                    end_insp=nan,
+                    printing=True,
+                    prev_P_max=nan
+                    ):
+    Ei = nan
+    Ri = nan
+    Ee = nan
+    Re = nan
+    Em = nan
+    Rm = nan
 
     # Start of inspiration:
     # This is at first crossing from negative flow to
@@ -63,7 +71,7 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
         end_insp = start_insp + 15
         i = end_insp
         while(i < len(flow) - 4):
-            if((flow[i] < 0.01 or flow[i+1] < 0) and flow[i+4] < 0.01):
+            if((flow[i] < 0.01 or flow[i+1] < 0) and flow[i+2] < 0.0):
                 end_insp = i
                 i = len(flow)
             i += 1
@@ -221,7 +229,7 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
         else:
             grad = grad_end
 
-        reconstruction_line = [min(P_max, grad*(b_offs + i) + point_b_pressure) for i in range(0, start_exp-P_max_index)]
+        reconstruction_line = [min(P_max, grad*(b_offs + i) + point_b_pressure) for i in range(0, start_exp)]
         if(printing):
             print('Pmax = {}'.format(P_max))
             print('zcp = {}'.format(zero_crossing_pressure))
@@ -232,7 +240,7 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
         area_difference = 0
         if(start_exp-P_max_index > 1):
             old_area = integral(pressure[P_max_index:start_exp], sampling_frequency)
-            new_area = integral(reconstruction_line, sampling_frequency)
+            new_area = integral(reconstruction_line[:start_exp-P_max_index], sampling_frequency)
             area_difference = (new_area[-1] - old_area[-1]) / new_area[-1]
             if(printing):
                 print('Area difference:')
@@ -242,7 +250,8 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
         # otherwise use the zero crossing pressure calculated.
         # Means that the pressure will be retained if not enough
         # changed by reconstruction
-        if(area_difference > 0.10):
+        MAX_AREA_NOT_RECONSTRUCTED = 1.005
+        if(area_difference > MAX_AREA_NOT_RECONSTRUCTED):
             # Reconstructed corner pressure
             salwa_pressure = grad*(b_offs) + point_b_pressure
             #salwa_pressure = grad*(b_offs-1+abs(zero_crossing_pressure)) + point_b_pressure
@@ -250,39 +259,96 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
         else:
             corner_pressure = zero_crossing_pressure
 
-        # put estimate to max pressure if estimate is
-        # much smaller than maximum pressure recorded
-        #if((grad_end < grad_start/3)
-        if(zero_crossing_pressure < 0.75*P_max):
-            corner_pressure = P_max
+        # Only do to breaths with smaller area
+        # Actually calculate results
+        using_threshold = False
+        if(prev_P_max != False):
+            using_threshold = True
 
-        # If pressure estimate is less than actual
-        # pressure, use the actual pressure
-        if(corner_pressure < zero_crossing_pressure):
-            corner_pressure = zero_crossing_pressure
+#        print('\np max info vvv')
+#        print(P_max)
+#        print(0.9*prev_P_max)
 
-        # Shift reference points and crop to expiration only
-        drop_pressure_new = [p - corner_pressure for p in pressure[start_exp:]]
+        if((area_difference < 0.125 and P_max > 0.9*prev_P_max) or not using_threshold):
+            # put estimate to max pressure if estimate is
+            # much smaller than maximum pressure recorded
+            #if((grad_end < grad_start/3)
+#            print('HERE')
+            if(zero_crossing_pressure < 0.75*P_max):
+                corner_pressure = P_max
 
-        dependent = np.array([drop_pressure_new[start:end]])
-        independent = np.array([drop_volume[start:end], drop_flow[start:end]])
-        Em = nan
-        Rm = nan
-        if(end - start > 5):
+            # If pressure estimate is less than actual
+            # pressure, use the actual pressure
+            if(corner_pressure < zero_crossing_pressure):
+                corner_pressure = zero_crossing_pressure
+
+            # Shift reference points and crop to expiration only
+            drop_pressure_new = [p - corner_pressure for p in pressure[start_exp:]]
+
+
+#            if((len(reconstruction_line) > b_offs) and (area_difference > MAX_AREA_NOT_RECONSTRUCTED)):
+#                #plt.plot(drop_pressure_new)
+#                print(reconstruction_line)
+#                print(b_offs)
+#                print(len(drop_pressure_new))
+#                rec_line_snippet = reconstruction_line[:b_offs]
+#                print(rec_line_snippet)
+#                for k in range(b_offs):
+#                    drop_pressure_new[k] = rec_line_snippet[-(k+1)] - corner_pressure
+#                #plt.plot(drop_pressure_new, '.')
+#                print(len(drop_pressure_new))
+#                #plt.show()
+
+            dependent = np.array([drop_pressure_new[start:end]])
+            independent = np.array([drop_volume[start:end], drop_flow[start:end]])
+            Em = nan
+            Rm = nan
+            if(end - start > 5):
+                try:
+                    expres = lstsq(independent.T, dependent.T)
+                    Em = expres[0][0][0]
+                    Rm = expres[0][1][0]
+                    fit_error = expres[1][0]
+                except(ValueError):
+                    print('ValueError: Data has nan?')
+
+            if(printing):
+                print('E from exp pressure (other): {}'.format(Em))
+                print('R from exp pressure (other): {}'.format(Rm))
+                print('E/R from exp pressure (other): {}'.format(Em/Rm))
+                #print('FITTING ERROR: {}'.format(fit_error))
+                print('')
+
+        # force reconstruction of inspiratory pressure for results
+        if(area_difference > 1.525):
+            start = start_insp + 8
+            end = end_insp - 4
+            #plt.plot(pressure)
+            reconstruction_line.reverse()
+            pressure = reconstruction_line
+            #plt.plot(pressure)
+            #plt.plot(start, pressure[start], 'o')
+            #plt.plot(end, pressure[end], 'o')
+            #plt.show()
+
+            # Crop data to insp range
+            pres = pressure[start:end]
+            flw = flow[start:end]
+            vol = volume[start:end]
+
+            # Params from insp pressure
+            dependent = np.array([pres])
+            independent = np.array([flw, vol])
+
             try:
-                expres = lstsq(independent.T, dependent.T)
-                Em = expres[0][0][0]
-                Rm = expres[0][1][0]
-                fit_error = expres[1][0]
+                res = lstsq(independent.T, dependent.T)
+                Ei = res[0][1][0]
+                Ri = res[0][0][0]
             except(ValueError):
                 print('ValueError: Data has nan?')
+                Ei = nan
+                Ri = nan
 
-        if(printing):
-            print('E from exp pressure (other): {}'.format(Em))
-            print('R from exp pressure (other): {}'.format(Rm))
-            print('E/R from exp pressure (other): {}'.format(Em/Rm))
-            #print('FITTING ERROR: {}'.format(fit_error))
-            print('')
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -481,34 +547,42 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
             f, (ax1) = plt.subplots(1, sharex=True)
 
             # Remake pressure
-            press_guess_insp = [Ei*volume[i] + Ri*flow[i] for i in range(start_insp+5, end_insp-5)]
+            press_guess_insp = [Ei*volume[i] + Ri*flow[i] for i in range(0, end_insp)]
+            #press_guess_insp = [Ei*volume[i] + Ri*flow[i] for i in range(start_insp+5, end_insp-5)]
             press_guess_exp = [Ee*volume[i] + Re*flow[i] for i in range(0, end_insp)]
             press_guess_other= [Em*volume[i] + Rm*flow[i] for i in range(0, end_insp)]
 
-            salwa_line = [min(P_max, grad*i + point_b_pressure) for i in range(end_insp+ b_offs + 1)]
+            salwa_line = [min(P_max, grad*i + point_b_pressure) for i in range(end_insp+ b_offs + 1 - P_max_index)]
             salwa_line.reverse()
 
-            ax1.plot(pressure, 'b', linewidth=3)
-            #ax1.plot(range(start_insp+5, end_insp-5), press_guess_insp, 'm:', linewidth=3)
+            ax1.plot(pressure[:end_insp], 'b', linewidth=5)
+           # ax1.plot(range(P_max_index, end_insp+b_offs+1), salwa_line, 'r--', linewidth=2)
+            ax1.plot(range(0, end_insp), press_guess_insp, 'r:', linewidth=5)
+            #ax1.plot(range(start_insp+5, end_insp-5), press_guess_insp, 'r:', linewidth=3)
             #ax1.plot(range(0, end_insp), press_guess_exp, 'g--', linewidth=3)
             #ax1.plot(range(0, end_insp), press_guess_other, '--', color='orange', linewidth=3)
-            ax1.plot(end_insp, corner_pressure, 'mo')
-            ax1.plot(start_exp - zero_crossing_offset, zero_crossing_pressure, 'cd')
-            ax1.plot(end_insp, P_start, 'ko')
-            ax1.plot(salwa_line, 'r--', linewidth=2)
-            ax1.plot(flow)
-            ax1.plot(end_insp, flow[end_insp], 'xg')
+            #ax1.plot(end_insp, corner_pressure, 'mo')
+            #ax1.plot(start_exp - zero_crossing_offset, zero_crossing_pressure, 'cd')
+            #ax1.plot(end_insp, P_start, 'ko')
+          #  ax1.plot(flow)
+          #  ax1.plot(end_insp, flow[end_insp], 'xg')
             #ax1.plot([-p for p in drop_pressure], 'm', linewidth=2)
             ax1.legend([
                         'Data',
+                        #'Reconstruction',
+                        'Model',
                        # 'Fwd sim from insp (E={:.1f}, R={:.1f})'.format(Ei, Ri),
                        # 'Fwd sim from exp (E={:.1f}, R={:.1f})'.format(Ee, Re),
                        # 'Fwd sim from other (E={:.1f}, R={:.1f})'.format(Em, Rm),
-                        'Reconstructed end-inspiratory pressure',
-                        'End-inspiratory pressure'
-                        ], loc=1, fontsize=18)
-            ax1.set_ylabel('Pressure (cmH20)', fontsize=22)
-            ax1.set_xlabel('Datapoint', fontsize=22)
+                       # 'Reconstructed end-inspiratory pressure',
+                       # 'End-inspiratory pressure'
+                        ], loc=1, fontsize=32)
+            ax1.set_ylabel('Pressure (cmH20)', fontsize=32)
+            ax1.set_xlabel('Datapoint', fontsize=32)
+#            ax1.annotate('Area reconstructed = {0:.2f}%'.format(area_difference*100),
+#                    xy=(1, 0), xycoords='axes fraction', fontsize=22,
+ #                   xytext=(-5, 5), textcoords='offset points',
+ #                   ha='right', va='bottom')
 
             #ax2.plot(flow, 'b', linewidth=3)
             #ax2.plot((end_insp - zero_crossing_offset), 0, 'co')
@@ -527,7 +601,7 @@ def split_parameters(pressure, flow, volume, sampling_frequency, prev_peep=nan, 
             #ax3.grid()
             plt.show()
 
-    if(abs(prev_peep - peep) < 0.5) or np.isnan(prev_peep):
-        return(Ei, Ri, Em, Rm, Ee, Re, peep)
+    if(((abs(prev_peep - peep) < 0.5) or np.isnan(prev_peep))):
+        return(Ei, Ri, Em, Rm, Ee, Re, peep, P_max)
     else:
-        return(nan, nan, nan, nan, nan, nan, peep)
+        return(nan, nan, nan, nan, nan, nan, peep, P_max)

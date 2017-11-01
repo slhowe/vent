@@ -106,19 +106,43 @@ if(__name__ == '__main__'):
         all_breath_data = []
 
     # plot cdf of results
-    plotting_cdf = 1
+    plotting_cdf = True
     if(plotting_cdf):
-        f, ax = plt.subplots(4, 2, sharex=False)
-        plot_index = 0
+        f, ax = plt.subplots(2, 2, sharex=False)
+        x_plot_index = 0
+        y_plot_index = 0
 
-#    pred_cycles = 5
-#    pressures = [[]]*pred_cycles
-#    flows = [[]]*pred_cycles
-#    volumes = [[]]*pred_cycles
-#    pred_index = -1
+    plotting_est_and_actual_lines = False
+    if(plotting_est_and_actual_lines):
+        markers = ['.','x','*','+']
+        mk = 0
 
-    trend = 1.16
-    offs = -1.16
+    using_predator = False
+    plot_predator = False
+    rolling_predator = True
+    inspiratory_predator = True
+    if(using_predator):
+        pred_cycles = 4
+
+    using_threshold = True
+    plotting_threshold = False
+    if(using_threshold):
+        P_index = 0
+        P_index_max = 7
+        prev_P_max_median = nan
+        prev_P_max = [0]*P_index_max
+        if(plotting_threshold):
+            threshold_breaths = [[] for i in range(P_index_max)]
+    else:
+        prev_P_max_median = False
+
+    # all the printing in this function
+    printing = True
+
+    trend = 1.04
+    trend_ci = [1.03, 1.07]
+    offs = 1.66
+    offs_ci = [2.08, 1.06]
 
 #    E_insp = []
 #    E_exp = []
@@ -144,6 +168,14 @@ if(__name__ == '__main__'):
         R_other_method = []
         E_est = []
 
+        # for predator
+        if(using_predator):
+            pressures = [[]]*pred_cycles
+            flows = [[]]*pred_cycles
+            volumes = [[]]*pred_cycles
+            pred_index = 0
+            ready_to_pred = False
+
         # Iterate through every breath in range specified
         for breath in range(first_breath,last_breath):
             total_breath_count += 1
@@ -159,29 +191,169 @@ if(__name__ == '__main__'):
             #plt.plot(pressure)
             #plt.show()
 
+            # calculate elastances for inspiratory data
+            res = split_parameters(pressure,
+                                    flow,
+                                    volume,
+                                    sampling_frequency,
+                                    prev_peep=nan,
+                                    end_insp=nan,
+                                    printing=False,
+                                    prev_P_max=prev_P_max_median)
+
+            if(using_threshold):
+                if(breath == 0):
+#                    print('lookieeee')
+#                    print(breath)
+#                    print(res[7])
+                    prev_P_max = [res[7] for k in range(P_index_max)]
+                else:
+                    prev_P_max[P_index] = res[7]
+                prev_P_max_median = np.median(prev_P_max)
+#                print(prev_P_max)
+#                print(res[0])
+#                print(res[2])
+                if(plotting_threshold):
+                    threshold_breaths[P_index] = pressure
+
+            if(plotting_threshold):
+                waveform = []
+                for k in range(P_index_max):
+                    waveform += threshold_breaths[P_index-k-1]
+                plt.plot(waveform)
+                plt.plot(range(len(waveform)), [(prev_P_max_median*0.9+res[6])]*len(waveform), '--')
+                plt.xlabel('datapoint', fontsize=22)
+                plt.ylabel('Pressure (cmH20)', fontsize=22)
+                plt.grid()
+                plt.legend(['Data', 'Threshold (90% median peak pressure)'])
+                plt.show()
+
+            # Extract results
+            inspiratory_elastance = res[0]
+            inspiratory_resistance = res[1]
+            expiratory_elastance = res[2]
+            expiratory_resistance = res[3]
+            adjusted_expiratory_elastance = (expiratory_elastance - offs)/trend
+
+            # save results that are not predator dependent
+            if(not inspiratory_predator):
+                E_insp.append(inspiratory_elastance)
+                R_insp.append(inspiratory_resistance)
+                all_E_insp.append(inspiratory_elastance)
+
             # PREDATOR #
-#            pred_index += 1
-#            if(pred_index == 5):
-#                pred_index = 0
-#
-#            # Predator
-#            if(breath < pred_cycles - 1):
-#                pressures[breath] = pressure
-#                flows[breath] = flow
-#                volumes[breath] = volume
-#            else:
-#                pressures[pred_index] = pressure
-#                flows[pred_index] = flow
-#                volumes[pred_index] = volume
-#
-#                new_data = predator(pressures, flows, volumes)
-#                pressure = new_data[0]
-#                flow = new_data[1]
-#                volume = new_data[2]
+            if(using_predator and (pre_post_signal == PRE or inspiratory_predator == True)):
+                # rolling predator shifts one breath at a time
+                if(rolling_predator):
+                    if(pred_index == pred_cycles):
+                        pred_index = 0
+                    # Predator
+                    if(breath < pred_cycles):
+                        pressures[breath] = pressure
+                        flows[breath] = flow
+                        volumes[breath] = volume
+                        # Check if all datasets are full
+                        if(breath == pred_cycles-1):
+                            ready_to_pred = True
+                # non-rolling uses each breath only once
+                else:
+                    if(pred_index < pred_cycles):
+                        pressures[pred_index] = pressure
+                        flows[pred_index] = flow
+                        volumes[pred_index] = volume
+                        pred_index += 1
+                        # Check if all datasets are full
+                        ready_to_pred = False
+                        if(pred_index == pred_cycles):
+                            ready_to_pred = True
+
+                if(ready_to_pred):
+                    # Rolling needs new set each time
+                    if(rolling_predator):
+                        pressures[pred_index] = pressure
+                        flows[pred_index] = flow
+                        volumes[pred_index] = volume
+                    # Get new data from predator method
+                    new_data = predator(pressures, flows, volumes, plotting=plot_predator)
+                    pressure_i = new_data[0]
+                    flow_i = new_data[1]
+                    volume_i = new_data[2]
+                    pressure_e = new_data[3]
+                    flow_e = new_data[4]
+                    volume_e = new_data[5]
+                    # Reset index for next time if batches
+                    if(not rolling_predator):
+                        pred_index = 0
+
+                    res = split_parameters(pressure_e,
+                                            flow_e,
+                                            volume_e,
+                                            sampling_frequency,
+                                            prev_peep=nan,
+                                            end_insp=nan,
+                                            printing=False,
+                                            prev_P_max=prev_P_max_median)
+
+                    if(using_threshold):
+                        if(breath == 0):
+#                            print('lookieeee')
+#                            print(breath)
+#                            print(res[7])
+                            prev_P_max = [res[7], res[7], res[7]]
+                        else:
+                            prev_P_max[P_index] = res[7]
+                        prev_P_max_median = np.median(prev_P_max)
+#                        print(prev_P_max)
+#                        print(res[0])
+#                        print(res[2])
+
+                    # Extract results
+                    expiratory_elastance = res[2]
+                    expiratory_resistance = res[3]
+                    adjusted_expiratory_elastance = (expiratory_elastance - offs)/trend
+
+                    if(inspiratory_predator):
+                        res = split_parameters(pressure_i,
+                                                flow_i,
+                                                volume_i,
+                                                sampling_frequency,
+                                                prev_peep=nan,
+                                                end_insp=nan,
+                                                printing=False,
+                                                prev_P_max=prev_P_max_median)
+
+                        inspiratory_elastance = res[0]
+                        inspiratory_resistance = res[1]
+                        E_insp.append(inspiratory_elastance)
+                        R_insp.append(inspiratory_resistance)
+                        all_E_insp.append(inspiratory_elastance)
+
+                    E_exp.append(expiratory_elastance)
+                    R_exp.append(expiratory_resistance)
+                    E_est.append(adjusted_expiratory_elastance)
+                    all_E_est.append(adjusted_expiratory_elastance)
+                    all_E_est_other.append(expiratory_elastance)    # Use for looking at unadjusted Ee
+
+                if(rolling_predator):
+                    pred_index += 1
+            else:
+                # If not pre-sedation or using predator results, use ones from earlier
+                if(inspiratory_predator):
+                    E_insp.append(inspiratory_elastance)
+                    R_insp.append(inspiratory_resistance)
+                    all_E_insp.append(inspiratory_elastance)
+
+                E_exp.append(expiratory_elastance)
+                R_exp.append(expiratory_resistance)
+                E_est.append(adjusted_expiratory_elastance)
+                all_E_est.append(adjusted_expiratory_elastance)
+                all_E_est_other.append(expiratory_elastance)    # Use for looking at unadjusted Ee
+
 
             if(plotting_breaths):
                 if(breath < 10):
                     breath_data = breath_data + pressure
+
 
                 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                 # filter data
@@ -190,60 +362,58 @@ if(__name__ == '__main__'):
     #            pressure = hamming(pressure, 30, sampling_frequency, 10)
     #            pressure = np.real(pressure).tolist()
 
-            res = split_parameters(pressure,
-                                    flow,
-                                    volume,
-                                    sampling_frequency,
-                                    prev_peep=nan,
-                                    end_insp=nan,
-                                    printing=False)
+            # Update indexing for threshold median
+            if(using_threshold):
+                P_index += 1
+                if(P_index >= P_index_max):
+                    P_index = 0
 
-            E_insp.append(res[0])
-            R_insp.append(res[1])
-            E_exp.append(res[2])
-            R_exp.append(res[3])
-            E_other_method.append(res[4])
-            R_other_method.append(res[5])
-            E_est.append((res[2] - offs)/trend)
-
-            all_E_insp.append(res[0])
-            all_E_est.append((res[2] - offs)/trend)
-            all_E_est_other.append((res[4] - offs)/trend)
+        # remove nan from results
+        all_E_est = [x for x in all_E_est if not np.isnan(x)]
+        all_E_est_other = [x for x in all_E_est_other if not np.isnan(x)]
+        all_E_insp = [x for x in all_E_insp if not np.isnan(x)]
 
         # Print results
         # Median
         # Median absolute deviation
         # IQR
-        qi75, qi50, qi25 = np.percentile(E_insp, [75, 50 ,25])
-        madi = mad(E_insp)
-        print('Inspiration:')
-        print('Median:')
-        print(qi50)
-        print('IQR:')
-        print(qi25, qi75)
-        print('MAD:')
-        print(madi)
+        qi75, qi50, qi25 = np.percentile(all_E_insp, [75, 50 ,25])
+        madi = mad(all_E_insp)
+        if(printing):
+            print('Inspiration:')
+            print('Median[IQR], Mad:')
+            print('{0:.2f} [{1:.2f}:{2:.2f}] & {3:.2f}'.format(qi50, qi25, qi75, madi))
+            print('Breaths used:')
+            print(len(all_E_insp))
 
-        qe75, qe50, qe25 = np.percentile(E_est, [75, 50 ,25])
-        made = mad(E_est)
-        print('\nExpiration:')
-        print('Median:')
-        print(qe50)
-        print('IQR:')
-        print(qe25, qe75)
-        print('MAD:')
-        print(made)
+        if(len(all_E_est) != 0):
+            qe75, qe50, qe25 = np.percentile(all_E_est, [75, 50 ,25])
+            made = mad(all_E_est)
+        else:
+            qe75, qe50, qe25 = [nan, nan, nan]
+            made = nan
+        if(printing):
+            print('\nExpiration:')
+            print('Median[IQR], Mad:')
+            print('{0:.2f} [{1:.2f}:{2:.2f}] & {3:.2f}'.format(qe50, qe25, qe75, made))
+            print('Breaths used:')
+            print(len(all_E_est))
+            print('\n')
+            print('{0:.2f} [{1:.2f}:{2:.2f}] & {3:.2f} & {4:.2f} [{5:.2f}:{6:.2f}] & {7:.2f}'.format(
+                 qi50, qi25, qi75, madi, qe50, qe25, qe75, made))
 
-        print('\nchange:')
-        print('Median:')
-        print(qe50 - qi50)
-        print('IQR:')
-        print(qe25-qi25, qe75-qi75)
-        print('MAD:')
-        print(made-madi)
+#        if(printing):
+#            print('\nchange:')
+#            print('Median:')
+#            print(qe50 - qi50)
+#            print('IQR:')
+#            print(qe25-qi25, qe75-qi75)
+#            print('MAD:')
+#            print(made-madi)
 
-        print('\ntotal breath count:')
-        print(total_breath_count)
+        if(printing):
+            print('\ntntotal breath count:')
+            print(total_breath_count)
 
         if(plotting_breaths):
             all_breath_data.append(breath_data)
@@ -296,31 +466,55 @@ if(__name__ == '__main__'):
                 #all_E_est_other = []
 
         # Plot all post sedation elastances and store
-        if(0):
+        if(plotting_est_and_actual_lines):
             if(pre_post_signal == POST):
                 for E in range(len(E_insp)):
                     post_E_insp.append(E_insp[E])
                     post_E_exp.append(E_exp[E])
-                plt.plot(E_insp, E_exp, 'o')
+                plt.plot(E_insp, E_exp, linestyle='', marker=markers[mk], label='_nolegend_')
+                mk+=1
 
         if(plotting_cdf):
             # cdf plots
 
             # Sort the elastance values
             cdf_Ee = np.sort(all_E_est)
+            cdf_Eo = np.sort(all_E_est_other)
             cdf_Ei = np.sort(all_E_insp)
+            cdf_Eci_low = [(d-offs_ci[0])/trend_ci[0] for d in all_E_est_other]
+            cdf_Eci_low = np.sort(cdf_Eci_low)
+            cdf_Eci_high = [(d-offs_ci[1])/trend_ci[1] for d in all_E_est_other]
+            cdf_Eci_high = np.sort(cdf_Eci_high)
+            cdf_worst_case_high = [e + 2.32 for e in cdf_Ee]
+            cdf_worst_case_low= [e - 2.32 for e in cdf_Ee]
 
             # Get list from 0->1
-            proportional_data = 1. * np.arange(len(all_E_est))/(len(all_E_est) - 1)
+            #expiration
+            proportional_data_e = 1. * np.arange(len(all_E_est))/(len(all_E_est) - 1)
+            # expiration pre-shift
+            proportional_data_o = 1. * np.arange(len(all_E_est_other))/(len(all_E_est_other) - 1)
+            # inspiration
+            proportional_data_i = 1. * np.arange(len(all_E_insp))/(len(all_E_insp) - 1)
 
             if(pre_post_signal == POST):
                 #ax[plot_index].grid()
-                ax[plot_index, 0].plot(cdf_Ei, proportional_data, 'b.-', linewidth=2)
-                ax[plot_index, 1].plot(cdf_Ee, proportional_data, 'b.-', linewidth=2)
-                plot_index += 1
+                ax[x_plot_index, y_plot_index].plot(cdf_Ee, proportional_data_e, 'r--', linewidth=3)
+                ax[x_plot_index, y_plot_index].plot(cdf_Ei, proportional_data_i, 'g-.', linewidth=3)
+               # ax[x_plot_index, y_plot_index].plot(cdf_Eo, proportional_data_e, 'b--', linewidth=2)
+               # ax[x_plot_index, y_plot_index].plot(cdf_Eci_low, proportional_data_e, 'k:', linewidth=2, label='_nolegend_')
+               # ax[x_plot_index, y_plot_index].plot(cdf_Eci_high, proportional_data_e, 'k:', linewidth=2, label='_nolegend_')
+                x_plot_index += 1
+                if(x_plot_index >= 2):
+                    x_plot_index = 0
+                    y_plot_index = 1
             else:
-                ax[plot_index, 0].plot(cdf_Ei, proportional_data, 'r', linewidth=2)
-                ax[plot_index, 1].plot(cdf_Ee, proportional_data, 'r', linewidth=2)
+               # ax[x_plot_index, y_plot_index].plot(cdf_Ei, proportional_data_i, 'm', linewidth=3)
+               # ax[x_plot_index, y_plot_index].plot(cdf_Eo, proportional_data_e, 'b', linewidth=2)
+                ax[x_plot_index, y_plot_index].plot(cdf_Ee, proportional_data_e, 'b', linewidth=3)
+                ax[x_plot_index, y_plot_index].plot(cdf_worst_case_high, proportional_data_e, 'k:')
+                ax[x_plot_index, y_plot_index].plot(cdf_worst_case_low, proportional_data_e, 'k:', label='_nolegend_')
+               # ax[x_plot_index, y_plot_index].plot(cdf_Eci_low, proportional_data_e, 'k:', linewidth=2, label='_nolegend_')
+               # ax[x_plot_index, y_plot_index].plot(cdf_Eci_high, proportional_data_e, 'k:', linewidth=2, label='_nolegend_')
 
             # Reset lists for next iteration
             all_E_insp = []
@@ -334,7 +528,8 @@ if(__name__ == '__main__'):
 
     # plot estimate lines over post_sedation data
     # Check if estimated relationships are close
-    if(0):
+    if(plotting_est_and_actual_lines):
+        # line thorugh data from zero
         dependent = np.array([post_E_exp])
         ones = [1]*len(post_E_insp)
         independent = np.array([post_E_insp, ones])
@@ -343,83 +538,116 @@ if(__name__ == '__main__'):
         offs = res[0][1][0]
         steps = range(51)
         line = [grad*s + offs for s in steps]
-        print('results vvv:')
-        print(grad, offs)
+        if(printing):
+            print('results vvv:')
+            print(grad, offs)
 
+        # line thorugh data from wherever
         dependent = np.array([post_E_exp])
         independent = np.array([post_E_insp])
         res = lstsq(independent.T, dependent.T)
         grad = res[0][0][0]
         offs = 0.0
         line2 = [grad*s + offs for s in steps]
-        print(grad, offs)
+        if(printing):
+            print(grad, offs)
 
-        plt.plot(steps, line, 'k')
-        plt.plot(steps, line2, 'g')
-        line1 = [1.12*s + 0 for s in range(51)]
-        line2 = [1.1*s + 0 for s in range(51)]
-        line3 = [1.16*s - 1.24  for s in range(51)]
-        line4 = [1.0*s + 2.24 for s in range(51)]
-        plt.plot(range(51), line1, 'r:')
-        plt.plot(range(51), line2, 'r--')
-        plt.plot(range(51), line3, 'b:')
-        plt.plot(range(51), line4, 'b--')
+        plt.plot(steps, line, 'k', linewidth=3)
+
+        line1 = [1.06*s + 1.05 for s in range(51)]
+        #line2 = [1.1*s + 0 for s in range(51)]
+        #line3 = [1.16*s - 1.24  for s in range(51)]
+        #line4 = [1.0*s + 2.24 for s in range(51)]
+        plt.plot(range(51), line1, 'r--', linewidth=3)
+        #plt.plot(range(51), line2, 'r--')
+        #plt.plot(range(51), line3, 'b:')
+        #plt.plot(range(51), line4, 'b--')
+        plt.tick_params(labelsize=16)
+        plt.xlim([10, 40])
+        plt.ylim([10, 40])
+        plt.xlabel('Inspiratory elastance (cmH2O/L)', fontsize=20)
+        plt.ylabel('Expiratory elastance (cmH2O/L)', fontsize=20)
+        plt.legend(['Best fit for all data',
+                    'Relationship from RM'])
         plt.grid()
         plt.show()
 
     if(plotting_cdf):
         for (m), subplot in np.ndenumerate(ax):
-            subplot.set_xlim([10,30])
+            subplot.set_xlabel("Elastance (cmH2O/L)", fontsize=20)
+            subplot.set_ylabel("Probability density", fontsize=20)
             subplot.tick_params(labelsize=16)
             subplot.grid()
         plt.setp([a.get_yticklabels() for a in ax[:,1]], visible=True)
 
-        ax[0, 1].legend([
-                        'Pre sedation',
-                        'Post sedation',
-                        ], loc=2, fontsize=16)
-        ax[0, 0].set_title('Inspiration', fontsize=20)
-        ax[0, 1].set_title('Expiration', fontsize=20)
+        ax[0, 0].set_xlim([0,40])
+        ax[0, 1].set_xlim([0,40])
+        ax[1, 0].set_xlim([0,40])
+        ax[1, 1].set_xlim([0,40])
 
-        f.add_subplot(111, frameon=False)
-        plt.tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
-        plt.xlabel("Elastance (cmH2O/L)", fontsize=20)
-        plt.ylabel("Probability density", fontsize=20)
+        ax[0, 0].legend([
+                  #  'Pre', 'Post',
+                        'Expiration pre',
+                        'Prediction interval',
+                        'Expiration post',
+                        'Inspiration post',
+                        ], loc=2, fontsize=15)
+        ax[0, 0].set_title('(a)', fontsize=20)
+        ax[0, 1].set_title('(b)', fontsize=20)
+        ax[1, 0].set_title('(c)', fontsize=20)
+        ax[1, 1].set_title('(d)', fontsize=20)
+
+        #f.add_subplot(111, frameon=False)
+        #plt.tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
+        #plt.xlabel("Elastance (cmH2O/L)", fontsize=20)
+        #plt.ylabel("Probability density", fontsize=20)
         plt.show()
 
     if(plotting_breaths):
         f, axarr = plt.subplots(4, 2)
-        time = [t/float(sampling_frequency) for t in range(2000)]
+        time = [t/float(sampling_frequency) for t in range(5500)]
 
         axarr[0, 0].plot(time[0:len(all_breath_data[0])], all_breath_data[0], linewidth=2)
-        axarr[0, 0].set_title('Pre-sedation', fontsize=24)
-        axarr[0,0].grid()
+        axarr[0, 0].grid()
+        axarr[0, 0].set_xlim([0,35])
+        axarr[0, 0].set_ylim([0,30])
 
         axarr[0, 1].plot(time[0:len(all_breath_data[1])], all_breath_data[1], linewidth=2)
-        axarr[0, 1].set_title('Post-sedation', fontsize=24)
-        axarr[0,1].grid()
+        axarr[0, 1].grid()
+        axarr[0, 1].set_xlim([0,35])
+        axarr[0, 1].set_ylim([0,30])
 
         axarr[1, 0].plot(time[0:len(all_breath_data[2])], all_breath_data[2], linewidth=2)
-        axarr[1,0].grid()
+        axarr[1, 0].grid()
+        axarr[1, 0].set_xlim([0,35])
+        axarr[1, 0].set_ylim([0,30])
 
         axarr[1, 1].plot(time[0:len(all_breath_data[3])], all_breath_data[3], linewidth=2)
-        axarr[1,1].grid()
+        axarr[1, 1].grid()
+        axarr[1, 1].set_xlim([0,35])
+        axarr[1, 1].set_ylim([0,30])
 
         axarr[2, 0].plot(time[0:len(all_breath_data[4])], all_breath_data[4], linewidth=2)
-        axarr[2,0].grid()
+        axarr[2, 0].grid()
+        axarr[2, 0].set_xlim([0,35])
+        axarr[2, 0].set_ylim([0,30])
 
         axarr[2, 1].plot(time[0:len(all_breath_data[5])], all_breath_data[5], linewidth=2)
-        axarr[2,1].grid()
+        axarr[2, 1].grid()
+        axarr[2, 1].set_xlim([0,35])
+        axarr[2, 1].set_ylim([0,30])
 
         axarr[3, 0].plot(time[0:len(all_breath_data[6])], all_breath_data[6], linewidth=2)
-        axarr[3,0].grid()
+        axarr[3, 0].grid()
+        axarr[3, 0].set_xlim([0,35])
+        axarr[3, 0].set_ylim([0,30])
 
         axarr[3, 1].plot(time[0:len(all_breath_data[7])], all_breath_data[7], linewidth=2)
-        axarr[3,1].grid()
+        axarr[3, 1].grid()
+        axarr[3, 1].set_xlim([0,35])
+        axarr[3, 1].set_ylim([0,30])
 
         for (m,n), subplot in np.ndenumerate(axarr):
-            subplot.set_xlim([0,35])
-            subplot.set_ylim([10,30])
             subplot.tick_params(labelsize=20)
 
         # Fine-tune figure; hide x ticks for top plots and y ticks for right plots
