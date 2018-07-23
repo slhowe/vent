@@ -367,7 +367,7 @@ def split_parameters(pressure,
         # All plotting below here
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Fitting on expiration
-        if(0):
+        if(1):
             # exponential fit to expiration
             exp_start = start
             exp_end = start + (end - start)*2/3
@@ -448,10 +448,12 @@ def split_parameters(pressure,
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Exp flow and pressure
-        if(0):
+        if(1):
             f, (ax1, ax2) = plt.subplots(2, sharex=True)
-            ax1.plot(flow, 'b', linewidth=5)
-            ax1.plot(range(start_exp+start, start_exp+end), full_exp_flow, 'r--', linewidth=5)
+            time = range(len(flow))
+            time = [float(t)/sampling_frequency for t in time]
+            ax1.plot(time, flow, 'b', linewidth=5)
+            ax1.plot(time[start_exp+start:start_exp+end], full_exp_flow, 'r--', linewidth=5)
             ax1.legend([
                 'Data',
                 'Exponential fit',
@@ -459,10 +461,10 @@ def split_parameters(pressure,
             ax1.grid()
             ax1.set_ylabel('Flow (L/s)', fontsize=16)
 
-            ax2.plot(pressure, 'b', linewidth=5)
+            ax2.plot(time, pressure, 'b', linewidth=5)
             ax2.grid()
             ax2.set_ylabel('Pressure (cmH2O)', fontsize=16)
-            ax2.set_xlabel('data point', fontsize=16)
+            ax2.set_xlabel('Time (s)', fontsize=16)
 
             plt.show()
 
@@ -572,8 +574,6 @@ def split_parameters(pressure,
                         #'Reconstruction',
                         'Model',
                        # 'Fwd sim from insp (E={:.1f}, R={:.1f})'.format(Ei, Ri),
-                       # 'Fwd sim from exp (E={:.1f}, R={:.1f})'.format(Ee, Re),
-                       # 'Fwd sim from other (E={:.1f}, R={:.1f})'.format(Em, Rm),
                        # 'Reconstructed end-inspiratory pressure',
                        # 'End-inspiratory pressure'
                         ], loc=1, fontsize=32)

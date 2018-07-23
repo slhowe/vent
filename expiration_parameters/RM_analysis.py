@@ -108,7 +108,7 @@ for num in set_breaths:
 markers = ['.', 'x', '+', '>', '<']
 mk = 0
 
-plotting_results = 0
+plotting_results = 1
 plotting_error_lines = 1
 through_zero = False
 
@@ -637,7 +637,7 @@ if(plotting_results):
     plt.xlabel('Residuals', fontsize=18)
     plt.show()
 
-if(1):
+if(0):
     # BLAND-ALTMAN PLOT
     def bland_altman_plot(data1, data2, *args, **kwargs):
         data1     = np.asarray(data1)
