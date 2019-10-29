@@ -48,7 +48,7 @@ data_files = [
              'RM-7.13.34.192.txt',
              'RM-10.28.22.406.txt',
              'RM-9.40.12.511.txt',
-           #  'RM-11.28.11.503.txt',
+        #     'RM-11.28.11.503.txt',
              'RM-1.58.37.25.txt',
 #             'RM-5.05.05.785.txt',
 #             'RM-8.48.21.970.txt', # only 8 breaths
@@ -60,7 +60,7 @@ data_files = [
              'RM-8.39.35.505.txt', # very tiny wobbles, veers off trend line??
             #MVB003
 #             'RM-1.13.20.568.txt', # not volume control w ramp flow?
-         #    'RM-12.15.24.824.txt', # dips in exp pressure, flow (VC) Also is a big blob
+       #      'RM-12.15.24.824.txt', # dips in exp pressure, flow (VC) Also is a big blob
              'RM-12.28.51.827.txt', # dips in exp pressure, flow (VC)
 #             'RM-5.34.33.870.txt', # flow async in insp?
 #             'RM-5.35.15.999.txt', # flow async in insp
@@ -81,6 +81,10 @@ fig = plt.figure()
 
 all_E_insp = []
 all_E_exp = []
+all_R_insp = []
+all_R_exp = []
+
+full_pressure = []
 
 total_breath_count = 0
 total_accepted_breath_count = 0
@@ -109,9 +113,10 @@ markers = ['.', 'x', '+', '>', '<']
 mk = 0
 
 plotting_results = 1
-plotting_error_lines = 1
+plotting_error_lines = 0
 through_zero = False
 
+#SETUP for error line plotting
 if(plotting_error_lines):
     # How many sets to use when making the error sets
     num_error_sets = 1000
@@ -124,6 +129,14 @@ if(plotting_error_lines):
     error_flow = []
     # Stores grad, offset, R value for each set
     error_line_data = [[0,0,0] for i in range(num_error_sets)]
+
+# Calculation of mechanics
+#
+#
+#
+#
+#
+#
 
 data_file_index = -1
 for data_file in data_files[:]:
@@ -151,24 +164,27 @@ for data_file in data_files[:]:
         total_breath_count += 1
         set_breath_count += 1
 
+        full_pressure += breath.pressure
         volume = integral(breath.flow, sampling_frequency)
 
+
+        # split_parameters function
+        # returns:
+        #
         res = split_parameters(breath.pressure,
                                breath.flow,
                                volume,
                                sampling_frequency,
                                peep,
-                               printing=False,
+                               printing=True,
                                prev_P_max = 0)
 
-        #E_insp.append(res[0])
-        #E_exp.append(res[4])
-        peep = res[6]
-        print('\n')
-        print('Volume change', volume[-1] - volume[0])
-        print('peep', peep)
-        print('elastance', res[0])
-        print('flow length', len(breath.flow))
+        peep = res[5]
+     #   print('\n')
+     #   print('Volume change', volume[-1] - volume[0])
+     #   print('peep', peep)
+     #   print('elastance', res[0])
+     #   print('flow length', len(breath.flow))
 
         #--------------------------------------
         # For tidal volume, respiratory rate
@@ -192,15 +208,21 @@ for data_file in data_files[:]:
 
         if not nan in res:
             R_insp.append(res[1])
-            R_exp.append(res[3])
-            #R_exp.append(res[5])
-            E_insp.append(res[0])
+            R_exp.append(res[4])
+            #E_insp.append(res[0])
+            #E_exp.append(res[3])
+            E_insp.append(res[1])
             E_exp.append(res[4])
-            #E_exp.append(res[4])
-            peeps.append(res[6])
-            E_results[data_file_index][set_breath_count-1] = [res[0], res[4]]
+            peeps.append(res[5])
+            #E_results[data_file_index][set_breath_count-1] = [res[0], res[3]]
+            E_results[data_file_index][set_breath_count-1] = [res[1], res[4]]
         else:
             bad_breath[data_file_index].append(set_breath_count-1)
+
+    #plt.plot(full_pressure)
+    #plt.yticks(fontsize=30)
+    #plt.ylabel('Pressure (cmH20)', fontsize=32)
+    #plt.show()
 
     print('Tidal volumes, respiratory rate, peep')
     print(Vt)
@@ -227,6 +249,8 @@ for data_file in data_files[:]:
     for i in range(len(E_insp)):
         all_E_insp.append(E_insp[i])
         all_E_exp.append(E_exp[i])
+        all_R_insp.append(R_insp[i])
+        all_R_exp.append(R_exp[i])
 
     print('\nbreaths this set:')
     print(set_breath_count)
@@ -568,19 +592,18 @@ if(plotting_results):
     plt.plot(steps, line2, 'k:', linewidth=2)
     plt.ylabel('Expiratory elastance (cmH2O/L)', fontsize=20)
     plt.xlabel('Inspiratory elastance (cmH2O/L)', fontsize=20)
-    ax.annotate('E$_e$ = {0:.2f}*E$_i$ + {1:.2f}\n\n\n\n\n'.format(grad, offs, PI),
-                    xy=(1, 0), xycoords='axes fraction', fontsize=22,
-                    xytext=(-5, 5), textcoords='offset points',
-                    ha='right')
+    if(plotting_error_lines):
+        ax.annotate('E$_e$ = {0:.2f}*E$_i$ + {1:.2f}\n\n\n\n\n'.format(grad, offs, PI),
+                        xy=(1, 0), xycoords='axes fraction', fontsize=22,
+                        xytext=(-5, 5), textcoords='offset points',
+                        ha='right')
     plt.grid()
     plt.ylim([10, 50])
     plt.xlim([10, 50])
-    plt.legend(['best fit', '95% confidence band','95% prediction interval'], fontsize=16)
-    plt.show()
-
-    # Error line on estimation
-    Error = [0]*len(all_E_insp)
+    if(plotting_error_lines):
+        plt.legend(['best fit', '95% confidence band','95% prediction interval'], fontsize=16)
     Estimates = [0]*len(all_E_insp)
+    Error = [0]*len(all_E_insp)
 
     for i in range(len(all_E_insp)):
         estimate = (all_E_exp[i])/grad
@@ -597,13 +620,14 @@ if(plotting_results):
 
     std_error = [e/std_dev for e in Error]
 
+    plt.figure()
     plt.plot(Estimates, Error, '.')
     plt.plot(range(50), [0]*50, 'k--')
     plt.xlabel('Estimated inspiratory elastance (cmH2O)', fontsize=18)
     plt.ylabel('Residuals', fontsize=18)
     plt.show()
 
-    # HISTOGRAM PLOT
+    plt.xlabel('Estimated inspiratory elastance (cmH2O)', fontsize=18)
     print('HISTOGRAM')
     residuals = [0]*len(all_E_insp)
     for num in range(len(all_E_insp)):

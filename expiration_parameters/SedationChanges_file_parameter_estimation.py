@@ -206,9 +206,9 @@ if(__name__ == '__main__'):
 #                    print('lookieeee')
 #                    print(breath)
 #                    print(res[7])
-                    prev_P_max = [res[7] for k in range(P_index_max)]
+                    prev_P_max = [res[6] for k in range(P_index_max)]
                 else:
-                    prev_P_max[P_index] = res[7]
+                    prev_P_max[P_index] = res[6]
                 prev_P_max_median = np.median(prev_P_max)
 #                print(prev_P_max)
 #                print(res[0])
@@ -231,8 +231,8 @@ if(__name__ == '__main__'):
             # Extract results
             inspiratory_elastance = res[0]
             inspiratory_resistance = res[1]
-            expiratory_elastance = res[2]
-            expiratory_resistance = res[3]
+            expiratory_elastance = res[3]
+            expiratory_resistance = res[4]
             adjusted_expiratory_elastance = (expiratory_elastance - offs)/trend
 
             # save results that are not predator dependent
@@ -299,17 +299,17 @@ if(__name__ == '__main__'):
 #                            print('lookieeee')
 #                            print(breath)
 #                            print(res[7])
-                            prev_P_max = [res[7], res[7], res[7]]
+                            prev_P_max = [res[6], res[6], res[6]]
                         else:
-                            prev_P_max[P_index] = res[7]
+                            prev_P_max[P_index] = res[6]
                         prev_P_max_median = np.median(prev_P_max)
 #                        print(prev_P_max)
 #                        print(res[0])
 #                        print(res[2])
 
                     # Extract results
-                    expiratory_elastance = res[2]
-                    expiratory_resistance = res[3]
+                    expiratory_elastance = res[3]
+                    expiratory_resistance = res[4]
                     adjusted_expiratory_elastance = (expiratory_elastance - offs)/trend
 
                     if(inspiratory_predator):

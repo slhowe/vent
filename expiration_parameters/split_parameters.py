@@ -33,8 +33,7 @@ def split_parameters(pressure,
     Ri = nan
     Ee = nan
     Re = nan
-    Em = nan
-    Rm = nan
+    decay = nan
 
     # Start of inspiration:
     # This is at first crossing from negative flow to
@@ -126,6 +125,9 @@ def split_parameters(pressure,
         plt.plot(flow)
         plt.show()
 
+
+
+
     else:
         #------------------------------------------------------------------------
         #------------------------------------------------------------------------
@@ -155,6 +157,9 @@ def split_parameters(pressure,
             print('R from insp pressure: {}'.format(Ri))
             print('E/R from insp pressure: {}'.format(Ei/Ri))
             print('')
+
+
+
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -206,7 +211,32 @@ def split_parameters(pressure,
             #print('FITTING ERROR: {}'.format(fit_error))
             print('')
 
-         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        if(1):
+            # fit for un-shifted data
+            dependent = np.array([pressure[start_exp+start:end]])
+            independent = np.array([volume[start_exp+start:end], flow[start_exp+start:end]])
+            Ee_unshift = nan
+            Re_unshift = nan
+            if(end - start > 5):
+                try:
+                    expres = lstsq(independent.T, dependent.T)
+                    Ee_unshift = expres[0][0][0]
+                    Re_unshift = expres[0][1][0]
+                    fit_error = expres[1][0]
+                except(ValueError):
+                    print('ValueError: Data has nan?')
+
+            if(printing):
+                print('E_unshift from exp pressure: {}'.format(Ee))
+                print('R_unshift from exp pressure: {}'.format(Re))
+                print('E/R_unshift from exp pressure: {}'.format(Ee/Re))
+                #print('FITTING ERROR: {}'.format(fit_error))
+                print('')
+
+
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Salwa method for better pressure estimation if end asynchrony
@@ -246,78 +276,9 @@ def split_parameters(pressure,
                 print('Area difference:')
                 print(area_difference)
 
-        # If large area reconstructed, use salwa estimate
-        # otherwise use the zero crossing pressure calculated.
-        # Means that the pressure will be retained if not enough
-        # changed by reconstruction
-        MAX_AREA_NOT_RECONSTRUCTED = 1.005
-        if(area_difference > MAX_AREA_NOT_RECONSTRUCTED):
-            # Reconstructed corner pressure
-            salwa_pressure = grad*(b_offs) + point_b_pressure
-            #salwa_pressure = grad*(b_offs-1+abs(zero_crossing_pressure)) + point_b_pressure
-            corner_pressure = min(P_max, salwa_pressure)
-        else:
-            corner_pressure = zero_crossing_pressure
-
-        # Only do to breaths with smaller area
-        # Actually calculate results
-        using_threshold = False
-        if(prev_P_max != False):
-            using_threshold = True
-
-#        print('\np max info vvv')
-#        print(P_max)
-#        print(0.9*prev_P_max)
-
-        if((area_difference < 0.125 and P_max > 0.9*prev_P_max) or not using_threshold):
-            # put estimate to max pressure if estimate is
-            # much smaller than maximum pressure recorded
-            #if((grad_end < grad_start/3)
-#            print('HERE')
-            if(zero_crossing_pressure < 0.75*P_max):
-                corner_pressure = P_max
-
-            # If pressure estimate is less than actual
-            # pressure, use the actual pressure
-            if(corner_pressure < zero_crossing_pressure):
-                corner_pressure = zero_crossing_pressure
-
-            # Shift reference points and crop to expiration only
-            drop_pressure_new = [p - corner_pressure for p in pressure[start_exp:]]
 
 
-#            if((len(reconstruction_line) > b_offs) and (area_difference > MAX_AREA_NOT_RECONSTRUCTED)):
-#                #plt.plot(drop_pressure_new)
-#                print(reconstruction_line)
-#                print(b_offs)
-#                print(len(drop_pressure_new))
-#                rec_line_snippet = reconstruction_line[:b_offs]
-#                print(rec_line_snippet)
-#                for k in range(b_offs):
-#                    drop_pressure_new[k] = rec_line_snippet[-(k+1)] - corner_pressure
-#                #plt.plot(drop_pressure_new, '.')
-#                print(len(drop_pressure_new))
-#                #plt.show()
 
-            dependent = np.array([drop_pressure_new[start:end]])
-            independent = np.array([drop_volume[start:end], drop_flow[start:end]])
-            Em = nan
-            Rm = nan
-            if(end - start > 5):
-                try:
-                    expres = lstsq(independent.T, dependent.T)
-                    Em = expres[0][0][0]
-                    Rm = expres[0][1][0]
-                    fit_error = expres[1][0]
-                except(ValueError):
-                    print('ValueError: Data has nan?')
-
-            if(printing):
-                print('E from exp pressure (other): {}'.format(Em))
-                print('R from exp pressure (other): {}'.format(Rm))
-                print('E/R from exp pressure (other): {}'.format(Em/Rm))
-                #print('FITTING ERROR: {}'.format(fit_error))
-                print('')
 
         # force reconstruction of inspiratory pressure for results
         if(area_difference > 1.525):
@@ -349,88 +310,201 @@ def split_parameters(pressure,
                 Ei = nan
                 Ri = nan
 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        #DECAY RATE
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # What is Edrs?
+        # Fitting on expiration
+        # exponential fit to expiration
+        exp_start = start
+        exp_end = start + (end - start)*2/3
 
-        start_edrs = drop_flow.index(min(drop_flow))
-        Edrs = [0]*(len(drop_pressure))
-        i = 0
-        while i < len(drop_pressure):
-            Edrs[i] = ((drop_pressure[i] - Rm*drop_flow[i])
-                               / min(drop_volume[i], -1e-2))
+        i = exp_start
+        while i < exp_end:
+            if drop_flow[i] >= 0:
+                exp_end = i - 1
+                i = exp_end
             i += 1
+
+        ln_flow = [np.log(-f) for f in drop_flow[exp_start:exp_end]]
+        ones = [1]*(exp_end - exp_start)
+        times = [t/float(sampling_frequency) for t in range(len(ones))]
+        full_times = [t/float(sampling_frequency) for t in range(end-start)]
+
+        dependent = np.array([ln_flow])
+        independent = np.array([ones, times])
+        try:
+            res = lstsq(independent.T, dependent.T)
+            decay = abs(res[0][1][0])
+            offset = -np.exp(res[0][0][0])
+        except(ValueError):
+            print('ValueError: Data has nan?')
+            decay = nan
+            offset = nan
+
+        if(printing):
+            print('E/R from decay rate of flow: {}'.format(decay))
+            print('')
+            print('E from decay and Re: {}'.format(decay*Re))
+            print('R from decay and Ee: {}'.format(Ee/decay))
+            print('')
+
+
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # All plotting below here
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Fitting on expiration
+        # Plot figure comparing shifted expiration fit to non-shifted (used in paper)
+        if(0):
+
+            plt.rc('legend',**{'fontsize':12})
+            f, (ax1, ax2) = plt.subplots(2, sharex=True)
+
+            # Forward simulate pressure of expiration
+            #press_guess_insp = [Ei*drop_volume[i] + Ri*drop_flow[i]
+            #              for i in range(0, len(drop_volume))]
+            press_guess_exp = [Ee_unshift*volume[i] + Re_unshift*flow[i]
+                          for i in range(start_exp, len(volume))]
+            EV_guess = [Ee_unshift*V for V in volume[start_exp:]]
+            RQ_guess = [Re_unshift*Q for Q in flow[start_exp:]]
+
+            ax1.plot(pressure[start_exp:], 'k-', linewidth=3)
+            ax1.plot(EV_guess, 'c+')
+            ax1.plot(RQ_guess, 'gx')
+            ax1.plot(press_guess_exp, 'r--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_exp, 'r--', linewidth=3)
+#            ax1.plot(press_guess_insp, 'k--', linewidth=3)
+            ax1.legend([
+                        'Original pressure data',
+                        'Lung pressure guess (E = {:.2f})'.format(Ee_unshift),
+                        'Resistive pressure guess (R = {:.2f})'.format(Re_unshift),
+                        'Forward simulation (P = EV + RQ)',
+                        ], fontsize=16, loc=1)
+            ax1.set_ylabel('Pressure (cmH20)', fontsize=16)
+            ax1.set_xlabel('(a)', fontsize=16)
+
+
+
+            press_guess_exp = [Ee*drop_volume[i] + Re*drop_flow[i]
+                          for i in range(len(drop_volume))]
+            press_guess_decayR = [(decay*Re)*drop_volume[i] + Re*drop_flow[i]
+                          for i in range(start, end)]
+            press_guess_decayE = [Ee*drop_volume[i] + (Ee/decay)*drop_flow[i]
+                          for i in range(start, end)]
+            EV_guess = [Ee*V for V in drop_volume]
+            RQ_guess = [Re*Q for Q in drop_flow]
+
+            ax2.plot(drop_pressure, 'k-', linewidth=3)
+            ax2.plot(EV_guess, 'c+')
+            ax2.plot(RQ_guess, 'gx')
+            ax2.plot(press_guess_exp, 'r--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_exp, 'r--', linewidth=3)
+#            ax1.plot(press_guess_insp, 'k--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_decayE, 'm--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_decayR, '--', color='orange',  linewidth=3)
+            ax2.legend([
+                        'Shifted pressure data',
+                        'Lung pressure guess (E = {:.2f})'.format(Ee),
+                        'Resistive pressure guess (R = {:.2f})'.format(Re),
+                        'Forward simulation (P = EV + RQ)',
+                        ], fontsize=16, loc=1)
+            ax2.set_ylabel('Pressure (cmH20)', fontsize=16)
+            ax2.set_xlabel('(b) \nData point', fontsize=16)
+
+
+
+            ax1.grid()
+            ax2.grid()
+            plt.show()
+
         if(1):
-            # exponential fit to expiration
-            exp_start = start
-            exp_end = start + (end - start)*2/3
 
-            i = exp_start
-            while i < exp_end:
-                if drop_flow[i] >= 0:
-                    exp_end = i - 1
-                    i = exp_end
-                i += 1
+            plt.rc('legend',**{'fontsize':12})
+            f, (ax1) = plt.subplots(1, sharex=True)
 
-            ln_flow = [np.log(-f) for f in drop_flow[exp_start:exp_end]]
-            ones = [1]*(exp_end - exp_start)
-            times = [t/float(sampling_frequency) for t in range(len(ones))]
-            full_times = [t/float(sampling_frequency) for t in range(end-start)]
+            # Forward simulate pressure of expiration
+            #press_guess_insp = [Ei*drop_volume[i] + Ri*drop_flow[i]
+            #              for i in range(0, len(drop_volume))]
+            press_guess_exp = [Ee*drop_volume[i] + Re*drop_flow[i]
+                          for i in range(len(drop_volume))]
+            press_guess_decayR = [(decay*Re)*drop_volume[i] + Re*drop_flow[i]
+                          for i in range(start, end)]
+            press_guess_decayE = [Ee*drop_volume[i] + (Ee/decay)*drop_flow[i]
+                          for i in range(start, end)]
+            EV_guess = [Ee*V for V in drop_volume]
+            RQ_guess = [Re*Q for Q in drop_flow]
 
-            dependent = np.array([ln_flow])
-            independent = np.array([ones, times])
-            try:
-                res = lstsq(independent.T, dependent.T)
-                decay = res[0][1][0]
-                offset = -np.exp(res[0][0][0])
-            except(ValueError):
-                print('ValueError: Data has nan?')
-                decay = nan
-                offset = nan
+            ax1.plot(drop_pressure, 'k-', linewidth=3)
+            ax1.plot(EV_guess, 'c+')
+            ax1.plot(RQ_guess, 'gx')
+            ax1.plot(press_guess_exp, 'r--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_exp, 'r--', linewidth=3)
+#            ax1.plot(press_guess_insp, 'k--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_decayE, 'm--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_decayR, '--', color='orange',  linewidth=3)
+            ax1.legend([
+                        'Pressure data (shifted to P0=0)',
+                        'Lung pressure guess (E = {:.2f})'.format(Ee),
+                        'Resistive pressure guess (R = {:.2f})'.format(Re),
+                        'Forward simulation from exp mechanics (P = EV + RQ)',
+                        ], fontsize=16, loc=1)
+            ax1.set_ylabel('Pressure (cmH20)', fontsize=16)
+            ax1.set_xlabel('(a)' , fontsize=16)
+            ax1.grid()
+            plt.show()
 
-            exp_flow = [offset*np.exp(decay*t) for t in times]
-            full_exp_flow = [offset*np.exp(decay*t) for t in full_times]
-            if(printing):
-                print('E/R from decay rate of flow: {}'.format(decay))
-                print('')
+
+        if(0):
 
             plt.rc('legend',**{'fontsize':12})
             f, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
 
-            # Forward simulate pressure
-            press_guess_insp = [Ei*drop_volume[i] + Ri*drop_flow[i]
-                          for i in range(0, len(drop_volume))]
+            # Forward simulate pressure of expiration
+            #press_guess_insp = [Ei*drop_volume[i] + Ri*drop_flow[i]
+            #              for i in range(0, len(drop_volume))]
             press_guess_exp = [Ee*drop_volume[i] + Re*drop_flow[i]
+                          for i in range(len(drop_volume))]
+            press_guess_decayR = [(decay*Re)*drop_volume[i] + Re*drop_flow[i]
                           for i in range(start, end)]
-            press_guess_other = [Em*drop_volume[i] + Rm*drop_flow[i]
-                          for i in range(0, len(drop_volume))]
+            press_guess_decayE = [Ee*drop_volume[i] + (Ee/decay)*drop_flow[i]
+                          for i in range(start, end)]
             EV_guess = [Ee*V for V in drop_volume]
             RQ_guess = [Re*Q for Q in drop_flow]
 
-            ax1.plot(drop_pressure, 'b', linewidth=3)
+            ax1.plot(drop_pressure, 'k-', linewidth=3)
             ax1.plot(EV_guess, 'c+')
             ax1.plot(RQ_guess, 'gx')
-            ax1.plot(range(start, end), press_guess_exp, 'r--', linewidth=3)
+            ax1.plot(press_guess_exp, 'r--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_exp, 'r--', linewidth=3)
+#            ax1.plot(press_guess_insp, 'k--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_decayE, 'm--', linewidth=3)
+            #ax1.plot(range(start, end), press_guess_decayR, '--', color='orange',  linewidth=3)
             ax1.legend([
-                        'Data',
-                        'Lung pressure (E = {:.2f})'.format(Ee),
-                        'Resistive pressure (R = {:.2f})'.format(Re),
-                        'Forward simulation (P = EV + RQ)'
+                        'Pressure data (shifted to P0=0)',
+                        'Lung pressure guess (Ee = {:.2f})'.format(Ee),
+                        'Resistive pressure guess (Re = {:.2f})'.format(Re),
+                        'Forward simulation from exp mechanics (P = Ee*V + Re*Q)',
+                        'Forward simulation from decay and Ee',
+                        'Forward simulation from decay and Re',
+                        'Forward simulation from insp mechanics (P = Ei*V + Ri*Q)',
                         ], fontsize=16, loc=1)
             ax1.set_ylabel('Pressure (cmH20)', fontsize=16)
 
+
+
+
+            exp_flow = [offset*np.exp(-decay*t) for t in times]
+            full_exp_flow = [offset*np.exp(-decay*t) for t in full_times]
+            full_exp_flow_Ee = [offset*np.exp(-(Ee/Re)*t) for t in full_times]
+
             ax2.plot(drop_flow, 'b', linewidth=3)
-            #ax2.plot(range(exp_start, exp_end), exp_flow, color='orange', linewidth=2)
-            #ax2.plot(range(start, end), full_exp_flow, '--', color='orange', linewidth=2)
+            ax2.plot(range(exp_start, exp_end), exp_flow, color='orange', linewidth=2)
+            ax2.plot(range(start, end), full_exp_flow, '--', color='orange', linewidth=2)
+            ax2.plot(range(start, end), full_exp_flow_Ee, '--', color='purple', linewidth=2)
             ax2.legend([
                          'Data',
+                         'Fwd sim of decay (Q = Q0*e^(-(E/R)t))',
                          ], fontsize=16)
             ax2.set_ylabel('Flow (L/s)', fontsize=16)
 
@@ -448,7 +522,7 @@ def split_parameters(pressure,
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Exp flow and pressure
-        if(1):
+        if(0):
             f, (ax1, ax2) = plt.subplots(2, sharex=True)
             time = range(len(flow))
             time = [float(t)/sampling_frequency for t in time]
@@ -468,18 +542,6 @@ def split_parameters(pressure,
 
             plt.show()
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # What is Edrs?
-
-        start_edrs = drop_flow.index(min(drop_flow))
-        Edrs = [0]*(len(drop_pressure))
-        i = 0
-        while i < len(drop_pressure):
-            Edrs[i] = ((drop_pressure[i] - Rm*drop_flow[i])
-                               / min(drop_volume[i], -1e-2))
-            i += 1
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # All plotting below here
@@ -544,22 +606,25 @@ def split_parameters(pressure,
         # Pressure, Flow, volume, fwd sim plot
         if(0):
             'Plot full flow and pressure and volume with estimates'
-            plt.rc('legend',**{'fontsize':10})
+            plt.rc('legend',**{'fontsize':30})
             #f, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
             f, (ax1) = plt.subplots(1, sharex=True)
 
             # Remake pressure
-            press_guess_insp = [Ei*volume[i] + Ri*flow[i] for i in range(0, end_insp)]
+            press_guess_insp = [Ei*volume[i] + Ri*flow[i] for i in range(5, end_insp)]
             #press_guess_insp = [Ei*volume[i] + Ri*flow[i] for i in range(start_insp+5, end_insp-5)]
-            press_guess_exp = [Ee*volume[i] + Re*flow[i] for i in range(0, end_insp)]
-            press_guess_other= [Em*volume[i] + Rm*flow[i] for i in range(0, end_insp)]
+            press_guess_exp = [Ee*volume[i] + Re*flow[i] for i in range(end_insp+5, len(pressure))]
+    #        press_guess_other= [Em*volume[i] + Rm*flow[i] for i in range(5, end_insp)]
 
-            salwa_line = [min(P_max, grad*i + point_b_pressure) for i in range(end_insp+ b_offs + 1 - P_max_index)]
-            salwa_line.reverse()
+    #        salwa_line = [min(P_max, grad*i + point_b_pressure) for i in range(end_insp+ b_offs + 1 - P_max_index)]
+    #        salwa_line.reverse()
 
-            ax1.plot(pressure[:end_insp], 'b', linewidth=5)
+            time = range(len(pressure))
+            time = [float(t)/sampling_frequency for t in time]
+
+            ax1.plot(time, pressure, 'b', linewidth=5)
            # ax1.plot(range(P_max_index, end_insp+b_offs+1), salwa_line, 'r--', linewidth=2)
-            ax1.plot(range(0, end_insp), press_guess_insp, 'r:', linewidth=5)
+            ax1.plot(time[end_insp+5:], press_guess_exp, 'r--', linewidth=5)
             #ax1.plot(range(start_insp+5, end_insp-5), press_guess_insp, 'r:', linewidth=3)
             #ax1.plot(range(0, end_insp), press_guess_exp, 'g--', linewidth=3)
             #ax1.plot(range(0, end_insp), press_guess_other, '--', color='orange', linewidth=3)
@@ -570,15 +635,17 @@ def split_parameters(pressure,
           #  ax1.plot(end_insp, flow[end_insp], 'xg')
             #ax1.plot([-p for p in drop_pressure], 'm', linewidth=2)
             ax1.legend([
-                        'Data',
+                        'Measured pressure',
                         #'Reconstruction',
-                        'Model',
+                        'Model Fit',
                        # 'Fwd sim from insp (E={:.1f}, R={:.1f})'.format(Ei, Ri),
                        # 'Reconstructed end-inspiratory pressure',
                        # 'End-inspiratory pressure'
-                        ], loc=1, fontsize=32)
+                        ], loc=1, fontsize=30)
             ax1.set_ylabel('Pressure (cmH20)', fontsize=32)
-            ax1.set_xlabel('Datapoint', fontsize=32)
+            ax1.set_xlabel('Time (s)', fontsize=32)
+            plt.xticks(fontsize=30)
+            plt.yticks(fontsize=30)
 #            ax1.annotate('Area reconstructed = {0:.2f}%'.format(area_difference*100),
 #                    xy=(1, 0), xycoords='axes fraction', fontsize=22,
  #                   xytext=(-5, 5), textcoords='offset points',
@@ -602,6 +669,6 @@ def split_parameters(pressure,
             plt.show()
 
     if(((abs(prev_peep - peep) < 0.5) or np.isnan(prev_peep))):
-        return(Ei, Ri, Em, Rm, Ee, Re, peep, P_max)
+        return(Ei, Ri, decay, Ee, Re, peep, P_max)
     else:
-        return(nan, nan, nan, nan, nan, nan, peep, P_max)
+        return(nan, nan, nan, nan, nan, peep, P_max)
